@@ -1,2 +1,3 @@
 import src.tools
 import src.ne_sim_visualizer
+import src.fewshot_ner_viz_component

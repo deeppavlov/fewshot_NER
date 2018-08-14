@@ -1,18 +1,28 @@
 import numpy as np
 import sys
+import copy
 from math import ceil, floor
 from sklearn.svm import SVC
+import tensorflow_hub as hub
+import tensorflow as tf
+from deeppavlov.dataset_readers.ontonotes_reader import OntonotesReader
+from deeppavlov.models.preprocessors.capitalization import CapitalizationPreprocessor
+from deeppavlov.models.embedders.glove_embedder import GloVeEmbedder
+from src.fewshot_ner_viz_component.utils import *
+# from utils import *
 
 class FewshotNerBinaryClassifier():
-    def __init__(embedder:CompositeEmbedder):
+    def __init__(self, embedder):
         self.embedder = embedder
         self.X_train = None
         self.y_train = None
         self.n_ne_tags = 0
         self.ne_prototype = None
+        self.embeddings_ne_flat = None
         self.svm_clf = SVC(probability=True, kernel='sigmoid')
 
-    def train_on_batch(tokens: list, tags: list):
+    def train_on_batch(self, tokens: list, tags: list):
+        print('Train')
         # Calculate embeddings
         embeddings = self.embedder.embed(tokens)
 
@@ -69,53 +79,57 @@ class FewshotNerBinaryClassifier():
         weights = [n_tokens/(2*n_ne) if label == 1 else n_tokens/(2*n_words) for label in self.y_train]
         self.svm_clf.fit(self.X_train, self.y_train, weights)
 
-    def predict(tokens, methods, sim_type='cosine'):
-        if instanceof(methods,str):
+    def predict(self, tokens, methods, params):
+        if isinstance(methods,str):
             methods = [methods]
         embeddings = self.embedder.embed(tokens)
         X_test = embeddings2feat_mat(embeddings, get_tokens_len(tokens))
         results = {}
         if 'ne_centroid' in methods:
             results.update({
-                'ne_centroid': _predict_with_ne_centroid(tokens, embeddings, sim_type=sim_type)})
+                'ne_centroid': self._predict_with_ne_centroid(tokens, embeddings, **params['ne_centroid'])})
         if 'ne_nearest' in methods:
             results.update({
-                'ne_nearest': _predict_with_ne_nearest(tokens, embeddings, sim_type=sim_type)})
+                'ne_nearest': self._predict_with_ne_nearest(tokens, embeddings, **params['ne_nearest'])})
         if 'svm' in methods:
             results.update({
-                'svm': _predict_with_SVM(X_test)})
+                'svm': self._predict_with_SVM(X_test)})
         if 'weighted_kNN' in methods:
             results.update({
-                'weighted_kNN': _predict_with_weighted_kNN(X_test, metric=sim_type)})
+                'weighted_kNN': self._predict_with_weighted_kNN(X_test, **params['weighted_kNN'])})
         if 'centroid_kNN' in methods:
             results.update({
-                'centroid_kNN': _predict_with_weighted_kNN(X_test, metric=sim_type)})
+                'centroid_kNN': self._predict_with_centroid_kNN(X_test, **params['centroid_kNN'])})
+        
+        return results
 
-    def _predict_with_ne_centroid(tokens: list, embeddings: np.ndarray, sim_type='cosine'):
+    def _predict_with_ne_centroid(self, tokens: list, embeddings: np.ndarray=None, sim_type='cosine'):
+        print('NE centroid similarity model')
         if isinstance(tokens[0], str):
             tokens = [tokens]
 
         tokens_length = get_tokens_len(tokens)
-        if embeddings == None:
+        if not isinstance(embeddings, np.ndarray) and embeddings == None:
             embeddings = self.embedder.embed(tokens)
 
         # Calculate similarities
-        sim_list = calc_sim_batch(tokens, embeddings, ne_prototype)
+        sim_list = calc_sim_batch(tokens, embeddings, self.ne_prototype)
 
         # Predict classes
         sim_min, sim_max = calc_sim_min_max(sim_list)
-        probas = np.array([sim_transform(sim_list[i][j][sim_type], sim_min, sim_max, T) for i in range(len(tokens_length)) for j in range(tokens_length[i])])
+        probas = np.array([sim_transform(sim_list[i][j][sim_type], sim_min, sim_max, T=0.5) for i in range(len(tokens_length)) for j in range(tokens_length[i])])
         pred = tags2binaryFlat(infer_tags(sim_list, sim_type, T=1, threshold=0.5))
 
         return {'sim': sim_list, 'pred': pred, 'probas': probas}
 
-    def _predict_with_ne_nearest(tokens: list, embeddings: np.ndarray, sim_type='cosine'):
+    def _predict_with_ne_nearest(self, tokens: list, embeddings: np.ndarray = None, sim_type='cosine'):
+        print('NE nearest similarity model')
         if isinstance(tokens[0], str):
             tokens = [tokens]
 
         tokens_length = get_tokens_len(tokens)
 
-        if embeddings == None:
+        if not isinstance(embeddings, np.ndarray) and embeddings == None:
             embeddings = self.embedder.embed(tokens)
 
         # Calculate similarities
@@ -131,22 +145,25 @@ class FewshotNerBinaryClassifier():
                 for k in range(n_supports):
                     sim = calc_sim(token_vec, ne_support_embeddings[k, :])[sim_type]
                     sim_token_list.append(sim)
-                sim_list[i].append(np.max(np.array(sim_token_list)))
+                sim_list[i].append({sim_type: np.max(np.array(sim_token_list))})
 
         # Predict classes
         sim_min, sim_max = calc_sim_min_max(sim_list)
-        probas = np.array([sim_transform(sim_list[i][j][sim_type], sim_min, sim_max, T) for i in range(len(tokens_length)) for j in range(tokens_length[i])])
+        probas = np.array([sim_transform(sim_list[i][j][sim_type], sim_min, sim_max, T=0.5) for i in range(len(tokens_length)) for j in range(tokens_length[i])])
         pred = tags2binaryFlat(infer_tags(sim_list, sim_type, T=1, threshold=0.5))
 
         return {'sim': sim_list, 'pred': pred, 'probas': probas}
 
-    def _predict_with_SVM(X_test: np.ndarray)
-        pred = svm_clf.predict(X_test)
-        probas = clf.predict_proba(X_test)[:,1]
+    def _predict_with_SVM(self, X_test: np.ndarray):
+        print('SVM classifier model')
+        pred = self.svm_clf.predict(X_test)
+        probas = self.svm_clf.predict_proba(X_test)[:,1]
 
         return {'pred': pred, 'probas': probas}
 
-    def _predict_with_weighted_kNN(X_test, k=1, metric='dot_prod', use_class_weights=True, use_sim_weights=True):
+    def _predict_with_weighted_kNN(self, X_test, k=3, metric='dot_prod', use_class_weights=False, use_sim_weights=True):
+        print('Weighted kNN model')
+        print('k = {}, metric: {}'. format(k, metric))
         X_train = self.X_train
         y_train = self.y_train
         # Weights for classes
@@ -196,9 +213,12 @@ class FewshotNerBinaryClassifier():
             sys.stdout.flush()
     #         print(prob_cur)
     #     print(probas)
+        print()
         return {'pred': pred, 'probas': probas}
 
-    def _predict_with_centroid_kNN(X_test, y_test=None, k=5, metric='cosine', use_class_weights=False):
+    def _predict_with_centroid_kNN(self, X_test, y_test=None, k=5, metric='cosine', use_class_weights=False):
+        print('NE centroid + words kNN similarity model')
+        print('k = {}, metric: {}'. format(k, metric))
         X_train = self.X_train
         y_train = self.y_train
         # Weights for classes
@@ -244,6 +264,7 @@ class FewshotNerBinaryClassifier():
             sys.stdout.flush()
     #         print(prob_cur)
     #     print(probas)
+        print()
         return {'pred': pred, 'probas': probas}
 
 class ElmoEmbedder():
@@ -270,9 +291,10 @@ class ElmoEmbedder():
         return embeddings[0]
 
 class CompositeEmbedder():
-    def __init__(self, use_elmo=True, elmo_scale=1., use_cap_feat=False, use_glove=False):
+    def __init__(self, use_elmo=True, elmo_scale=1., cap_scale=1., use_cap_feat=False, use_glove=False, ):
         self.use_elmo = use_elmo
         self.elmo_scale = elmo_scale
+        self.cap_scale = cap_scale
         self.use_cap_feat = use_cap_feat
         self.use_glove = use_glove
         if self.use_elmo:
@@ -298,7 +320,7 @@ class CompositeEmbedder():
         # Use capitalization features
         if self.use_cap_feat:
 #             print('Use capitalization features')
-            cap_features = self.cap_prep(tokens)
+            cap_features = self.cap_prep(tokens)*self.cap_scale
     #         print(cap_features)
 #             print(cap_features.shape)
             embeddings = np.concatenate((embeddings, cap_features), axis=2)
@@ -319,83 +341,3 @@ class CompositeEmbedder():
 #             print(embeddings.shape)
 
         return embeddings
-
-# Utility functions
-def get_tokens_len(tokens):
-    if isinstance(tokens[0], str):
-        tokens = [tokens]
-    return [len(seq) for seq in tokens]
-
-def add_padding(tokens:list):
-    if isinstance(tokens[0], str):
-        return tokens, len(tokens)
-    elif isinstance(tokens[0], list):
-        tokens = copy.deepcopy(tokens)
-        max_len = 0
-        for seq in tokens:
-            if len(seq) > max_len:
-                max_len = len(seq)
-        for seq in tokens:
-            i = len(seq)
-            while i < max_len:
-                seq.append('')
-                i += 1
-        return tokens
-    else:
-        raise Exception('tokens should be either list of strings or list of lists of strings')
-
-def calc_sim(token_vec, support_vec)->dict:
-    sim = {}
-    sim['euc_dist'] = np.exp(-np.linalg.norm(token_vec - support_vec))
-    sim['dot_prod'] = np.dot(token_vec, support_vec)
-    sim['cosine'] = np.dot(token_vec, support_vec)/(np.linalg.norm(token_vec)*np.linalg.norm(support_vec)) if np.linalg.norm(support_vec) != 0 else 0
-    return sim
-
-def calc_sim_batch(tokens: list, embeddings: np.ndarray, support_vec: np.ndarray)->list:
-    sim_list = []
-    tokens_length = get_tokens_len(tokens)
-    for i in range(len(tokens_length)):
-        sim_list.append([])
-        for j in range(tokens_length[i]):
-            token_vec = embeddings[i,j,:]
-            sim_list[i].append(calc_sim(token_vec, support_vec))
-    return sim_list
-
-def get_tokens_count(tokens:list):
-    return len([t for seq in tokens for t in seq])
-def embeddings2feat_mat(embeddings:np.ndarray, tokens_length):
-    n_tokens = sum(tokens_length)
-    n_features = embeddings.shape[-1]
-    feat_mat = np.zeros((n_tokens, n_features))
-#     print(feat_mat.shape)
-    k = 0
-    for i in range(len(tokens_length)):
-        for j in range(tokens_length[i]):
-            feat_mat[k, :] = embeddings[i, j, :]
-            k += 1
-    return feat_mat
-
-def flatten_list(ar:list):
-    flat = []
-    for sublist in ar:
-        flat += sublist
-    return flat
-
-def tags2binaryFlat(tags):
-    return np.array([1 if t == 'T' else 0 for seq in tags for t in seq])
-
-def calc_sim_min_max(sim_list):
-    sim_flat = flatten_sim(sim_list)
-    sim_min = np.min(sim_flat['cosine'])
-    sim_max = np.max(sim_flat['cosine'])
-    return (sim_min, sim_max)
-
-def sim_transform(sim, sim_min, sim_max, T=0.5):
-    # similarity transformation with temperature for better visualization
-    return (np.exp(sim/T) - np.exp(sim_min/T))/(np.exp(sim_max/T) - np.exp(sim_min/T))
-
-def infer_tags(sim_list, sim_type, T=0.5, threshold=0.5):
-    sim_min, sim_max = calc_sim_min_max(sim_list)
-    tokens_length = get_tokens_len(sim_list)
-    tags = [['T' if sim_transform(sim_list[i][j][sim_type], sim_min, sim_max, T)  > threshold else 'O' for j in range(tokens_length[i])] for i in range(len(tokens_length))]
-    return tags
