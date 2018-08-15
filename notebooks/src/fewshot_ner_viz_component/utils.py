@@ -115,6 +115,37 @@ def split_tokens_tags(dataset: list):
         tags.append(sample[1])
     return tokens, tags
 
+def calc_data_props(tokens:list, tags:list):
+    props = {}
+    props['ne_types'] = {}
+    tokens_flat = flatten_list(tokens)
+    tags_flat = flatten_list(tags)
+    ne_count = 0
+    for tag in tags_flat:
+        if tag != 'O':
+            ne_count += 1
+            tag_main = tag[2:]
+            if props['ne_types'].get(tag_main) != None:
+                props['ne_types'][tag_main] += 1
+            else:
+                props['ne_types'][tag_main] = 1
+    props['sent_count'] = len(tokens)
+    props['tokens_count'] = len(tokens_flat)
+    props['ne_count'] = ne_count
+    props['ne_ratio'] = props['ne_count']/props['tokens_count']
+    for k in props['ne_types'].keys():
+        props['ne_types'][k] /= ne_count
+
+    return props
+
+def print_data_props(props:dict):
+    s = ''
+    s += '#sentences = {}, '.format(props['sent_count'])
+    s += '#tokens = {}, '.format(props['tokens_count'])
+    s += '#ne = {}, '.format(props['ne_count'])
+    s += '#ne / #tokens = {:.3f}, '.format(props['ne_ratio'])
+    print(s)
+
 def softmax(ar, scale=True):
     ar = ar[:]
     eps = 1e-10

@@ -100,7 +100,7 @@ class FewshotNerBinaryClassifier():
         if 'centroid_kNN' in methods:
             results.update({
                 'centroid_kNN': self._predict_with_centroid_kNN(X_test, **params['centroid_kNN'])})
-        
+
         return results
 
     def _predict_with_ne_centroid(self, tokens: list, embeddings: np.ndarray=None, sim_type='cosine'):
@@ -268,7 +268,9 @@ class FewshotNerBinaryClassifier():
         return {'pred': pred, 'probas': probas}
 
 class ElmoEmbedder():
-    def __init__(self):
+    def __init__(self, custom_weights=False, weights: list = []):
+        self.custom_weights = custom_weights
+        self.weights = weights
         self.elmo = hub.Module("https://tfhub.dev/google/elmo/2", trainable=True)
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
@@ -280,25 +282,34 @@ class ElmoEmbedder():
                 tokens_length = [len(seq) for seq in tokens_input]
             else:
                 tokens_length = len(tokens_input)
-        embeddings = self.elmo(
+        elmo_res = self.elmo(
                         inputs={
                             "tokens": tokens_input,
                             "sequence_len": tokens_length
                         },
                         signature="tokens",
-                        as_dict=True)["elmo"]
-        embeddings = self.sess.run([embeddings])
-        return embeddings[0]
+                        as_dict=True)
+        embeddings_sum = elmo_res["elmo"]
+        embeddings_layer1 = elmo_res["lstm_outputs1"]
+        embeddings_layer2 = elmo_res["lstm_outputs2"]
+        embeddings_sum, embeddings_layer1, embeddings_layer2 = self.sess.run([embeddings_sum, embeddings_layer1, embeddings_layer2])
+        # print(embeddings_sum.shape)
+        # print(embeddings_layer1.shape)
+        # print(embeddings_layer2.shape)
+        embeddings = embeddings_sum
+        if self.custom_weights and len(self.weights) == 2:
+            embeddings = embeddings_layer1*self.weights[0] + embeddings_layer2*self.weights[1]
+        return embeddings
 
 class CompositeEmbedder():
-    def __init__(self, use_elmo=True, elmo_scale=1., cap_scale=1., use_cap_feat=False, use_glove=False, ):
+    def __init__(self, use_elmo=True, elmo_scale=1., cap_scale=1., use_cap_feat=False, use_glove=False, elmo_params={}):
         self.use_elmo = use_elmo
         self.elmo_scale = elmo_scale
         self.cap_scale = cap_scale
         self.use_cap_feat = use_cap_feat
         self.use_glove = use_glove
         if self.use_elmo:
-            self.elmo = ElmoEmbedder()
+            self.elmo = ElmoEmbedder(**elmo_params)
         if self.use_cap_feat:
             self.cap_prep = CapitalizationPreprocessor()
         if self.use_glove:
