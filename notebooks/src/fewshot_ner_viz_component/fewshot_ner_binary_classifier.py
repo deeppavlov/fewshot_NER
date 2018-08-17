@@ -290,15 +290,20 @@ class ElmoEmbedder():
                         signature="tokens",
                         as_dict=True)
         embeddings_sum = elmo_res["elmo"]
+        word_emb = elmo_res["word_emb"]
         embeddings_layer1 = elmo_res["lstm_outputs1"]
         embeddings_layer2 = elmo_res["lstm_outputs2"]
-        embeddings_sum, embeddings_layer1, embeddings_layer2 = self.sess.run([embeddings_sum, embeddings_layer1, embeddings_layer2])
+        embeddings_sum, word_emb, embeddings_layer1, embeddings_layer2 = self.sess.run([embeddings_sum, word_emb, embeddings_layer1, embeddings_layer2])
+        word_emb = np.concatenate((word_emb, word_emb), axis=-1)
         # print(embeddings_sum.shape)
         # print(embeddings_layer1.shape)
         # print(embeddings_layer2.shape)
         embeddings = embeddings_sum
-        if self.custom_weights and len(self.weights) == 2:
-            embeddings = embeddings_layer1*self.weights[0] + embeddings_layer2*self.weights[1]
+        if self.custom_weights:
+            if len(self.weights) == 2:
+                embeddings = embeddings_layer1*self.weights[0] + embeddings_layer2*self.weights[1]
+            elif len(self.weights) == 3:
+                embeddings = word_emb*self.weights[0] + embeddings_layer1*self.weights[1] + embeddings_layer2*self.weights[2]
         return embeddings
 
 class CompositeEmbedder():
