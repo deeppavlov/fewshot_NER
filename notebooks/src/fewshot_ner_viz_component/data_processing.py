@@ -13,7 +13,7 @@ def read_data():
     print(dataset['train'][50:60])
     return dataset
 
-def filter_data_by_ne_type(data:list, ne_types:list, tags2binary=False):
+def filter_data_by_ne_type(data:list, ne_types:list, tags2binary=False, preserveBIO=False):
     if ne_types == None or len(ne_types) == 0:
         return data
     data_filtered = []
@@ -26,16 +26,19 @@ def filter_data_by_ne_type(data:list, ne_types:list, tags2binary=False):
                 break
         if contains_all:
             if tags2binary:
-                tags = ['T' if t in ne_types else 'O' for t in tags_norm]
+                if preserveBIO:
+                    tags = [tags[i][:2]+'T' if t in ne_types else 'O' for i,t in enumerate(tags_norm)]
+                else:
+                    tags = ['T' if t in ne_types else 'O' for t in tags_norm]
             data_filtered.append((tokens,tags))
     return data_filtered
 
-def filter_dataset_by_ne_types(dataset: list, ne_types):
+def filter_dataset_by_ne_types(dataset: list, ne_types, preserveBIO=False):
     dataset = copy.deepcopy(dataset)
     if not isinstance(ne_types, list):
         ne_types = [ne_types]
     for dataset_type in ['train', 'valid', 'test']:
-        dataset[dataset_type] = filter_data_by_ne_type(dataset[dataset_type], ne_types, tags2binary=True)
+        dataset[dataset_type] = filter_data_by_ne_type(dataset[dataset_type], ne_types, preserveBIO=preserveBIO, tags2binary=True)
         print('Num of {} sentences: {}'.format(dataset_type, len(dataset[dataset_type])))
     return dataset
 

@@ -3,6 +3,7 @@ import sys
 import copy
 from math import ceil, floor
 from sklearn.svm import SVC
+from sklearn.metrics import f1_score
 import tensorflow_hub as hub
 import tensorflow as tf
 from deeppavlov.dataset_readers.ontonotes_reader import OntonotesReader
@@ -357,3 +358,49 @@ class CompositeEmbedder():
 #             print(embeddings.shape)
 
         return embeddings
+
+def select_sim_thresholds_with_cv(tokens: list, tags: list, embedder):
+    print('select_sim_thresholds_with_cv')
+    methods = ['ne_centroid', 'ne_nearest']
+    n_examples = len(tokens)
+    n_fold = 5
+    n_valid_sent = math.ceil(n_examples/n_fold)
+    th_list = np.arange(0,1,0.05)
+    f1_scores_avg = {}
+    for method in methods:
+        f1_scores_avg[method] = np.zeros(th_list.size)
+    k = 0
+    for i in range(n_fold):
+        print('Fold number: {}'.format(i+1))
+        tokens_valid = tokens[k:k+n_valid_sent]
+        tags_valid = tags[k:k+n_valid_sent]
+        tokens_train = tokens[0:k] + tokens[k+n_valid_sent:]
+        tags_train = tags[0:k] + tags[k+n_valid_sent:]
+        y_valid = tags2binaryFlat(tags_valid)
+        k += n_valid_sent
+        print('Train set:')
+        print_data_props(calc_data_props(tokens_train, tags_train))
+        print('Valid set:')
+        print_data_props(calc_data_props(tokens_valid, tags_valid))
+        model = FewshotNerBinaryClassifier(embedder)
+        model.train_on_batch(tokens_train, tags_train)
+        results = model.predict(tokens_valid, methods=methods, params={'ne_centroid': {'sim_type': 'cosine'},
+               'ne_nearest': {'sim_type': 'cosine'}})
+        for method in methods:
+            for th_idx, th in enumerate(th_list):
+                pred = pred_class_labels_bin(np.array(flat_sim_one_type(results[method]['sim'], sim_type='cosine')), th)
+                f1 = f1_score(y_valid, pred)
+                f1_scores_avg[method][th_idx] += f1
+    for method in methods:
+        for th_idx, th in enumerate(th_list):
+            f1_scores_avg[method][th_idx] = f1_scores_avg[method][th_idx]/n_fold
+    print('Average F1 scores:')
+    print(f1_scores_avg)
+    cv_res = {}
+    for method in methods:
+        idx_best = np.argmax(f1_scores_avg[method])
+        th_best = th_list[idx_best]
+        f1_best = f1_scores_avg[method][idx_best]
+        cv_res[method] = {'threshold': th_best, 'f1': f1_best}
+    print('CV results: {}'.format(cv_res))
+    return cv_res
