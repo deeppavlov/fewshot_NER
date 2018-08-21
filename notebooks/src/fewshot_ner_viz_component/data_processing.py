@@ -43,5 +43,5 @@ def filter_dataset_by_ne_types(dataset: list, ne_types, preserveBIO=False):
     return dataset
 
 def get_data_sample(data, n_samples: int):
-    indices = np.random.choice(len(data), size=n_samples)
+    indices = np.random.choice(len(data), size=n_samples, replace=False)
     return split_tokens_tags([data[i] for i in indices])

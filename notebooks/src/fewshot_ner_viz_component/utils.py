@@ -3,6 +3,9 @@ import copy
 from sklearn.metrics import f1_score
 from collections import OrderedDict
 import math
+import matplotlib.pyplot as plt
+from scipy.stats.kde import gaussian_kde
+from numpy import linspace
 
 # Utility functions
 def get_tokens_len(tokens):
@@ -43,6 +46,30 @@ def calc_sim(token_vec, support_vec)->dict:
     sim['cosine'] = np.dot(token_vec, support_vec)/(np.linalg.norm(token_vec)*np.linalg.norm(support_vec)) if np.linalg.norm(support_vec) != 0 else 0
     return sim
 
+def calc_mahalanobis_dist(v: np.ndarray, X: np.ndarray):
+    X_cov = np.cov(X, rowvar=False)
+    X_mean = np.mean(X, axis=0)
+    d = np.zeros(v.shape[0])
+    for i in range(v.shape[0]):
+        v_e = v[i, :]
+        d[i] = np.sqrt(np.dot(np.dot((v_e - X_mean), X_cov), (v_e - X_mean).T))
+    return d
+
+def normalize(x: np.ndarray):
+    return x/np.tile(np.expand_dims(np.linalg.norm(x, axis=-1), axis=-1), x.shape[-1])
+
+def calc_sim_by_type(x1: np.ndarray, x2: np.ndarray, sim_type='cosine'):
+    if sim_type == 'euc_dist':
+        return np.exp(-np.linalg.norm(x1 - x2, axis=-1))
+    elif sim_type == 'dot_prod':
+        return np.dot(x1, x2.T)
+    elif sim_type == 'cosine':
+        return np.dot(normalize(x1), normalize(x2).T)
+    elif sim_type == 'mahalanobis':
+        if len(x2.shape) < 2 or x2.shape[1] < 2:
+            raise Exception('x2 have to be a matrix')
+        return np.exp(-calc_mahalanobis_dist(x1, x2))
+
 def calc_sim_batch(tokens: list, embeddings: np.ndarray, support_vec: np.ndarray)->list:
     sim_list = []
     tokens_length = get_tokens_len(tokens)
@@ -52,6 +79,46 @@ def calc_sim_batch(tokens: list, embeddings: np.ndarray, support_vec: np.ndarray
             token_vec = embeddings[i,j,:]
             sim_list[i].append(calc_sim(token_vec, support_vec))
     return sim_list
+
+def calc_sim_ne_centroid(X_support, y_support, X_query, sim_type='cosine'):
+    X_sup_ne = X_support[y_support == 1, :]
+    X_sup_words = X_support[y_support == 0, :]
+    ne_sup_centroid = np.mean(X_sup_ne, axis=0)
+    sim_q_list = calc_sim_by_type(X_query, ne_sup_centroid, sim_type)
+    return sim_q_list
+
+def plotPDE(sims, y, info=''):
+    sims_words = sims[y == 0]
+    sims_ne = sims[y == 1]
+    plt.figure(figsize=(7,5))
+    kde_words = gaussian_kde(sims_words)
+    dist_space_words = linspace(min(sims_words), max(sims_words), 100)
+    kde_ne = gaussian_kde( sims_ne )
+    dist_space_ne = linspace(min(sims_ne), max(sims_ne), 100)
+    plt.plot( dist_space_words, kde_words(dist_space_words), color='green', label='words' )
+    plt.plot( dist_space_ne, kde_ne(dist_space_ne), color='red',  label='named entities' )
+    plt.legend(loc='upper right')
+    plt.title(info)
+    plt.grid()
+
+from sklearn.manifold import TSNE
+from sklearn.decomposition import PCA
+def plot_tSNE(X, y: np.ndarray, colors=('g', 'r'), labels=('words','entities'), title='', use_pca=False, subplot=None):
+    X = deepcopy(X)
+    if use_pca:
+        X = PCA(n_components=50).fit_transform(X)
+    tsne = TSNE(n_components=2, method='exact', init='pca')
+    X_2d = tsne.fit_transform(X)
+    if not subplot:
+        plt.figure()
+    else:
+        plt.subplot(subplot['nrows'], subplot['ncols'], subplot['index'], title=title)
+    for i in range(2):
+        X_sel = X_2d[y == i, :]
+        plt.scatter(X_sel[:, 0], X_sel[:, 1], c=colors[i], alpha= 0.5, label=labels[i])
+    plt.legend()
+    if not subplot:
+        plt.title(title)
 
 def get_tokens_count(tokens:list):
     return len([t for seq in tokens for t in seq])
@@ -78,6 +145,10 @@ def getNeTagMainPart(tag:str):
 
 def tags2binaryFlat(tags):
     return np.array([1 if t == 'T' or (len(t) > 2 and t[2:] == 'T') else 0 for seq in tags for t in seq])
+
+def get_matrices(tokens, tags, embedder):
+    return (embeddings2feat_mat(embedder.embed(tokens), get_tokens_len(tokens)),
+           tags2binaryFlat(tags))
 
 def removeBIOFromTags(tags):
     tags_res = []

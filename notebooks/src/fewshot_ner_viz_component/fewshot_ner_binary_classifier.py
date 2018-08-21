@@ -320,6 +320,7 @@ class CompositeEmbedder():
             self.cap_prep = CapitalizationPreprocessor()
         if self.use_glove:
             self.glove = GloVeEmbedder('embeddings/glove.6B/glove.6B.100d.txt', pad_zero=True)
+        self.embed_size = self.embed(['hehe']).shape[-1]
 
     def embed(self, tokens: list):
         if isinstance(tokens[0], str):
