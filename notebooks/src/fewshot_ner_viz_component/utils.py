@@ -41,19 +41,25 @@ def add_padding(tokens:list):
 
 def calc_sim(token_vec, support_vec)->dict:
     sim = {}
-    sim['euc_dist'] = np.exp(-np.linalg.norm(token_vec - support_vec))
+    sim['euc_dist'] = np.exp(-np.linalg.norm(token_vec - support_vec, axis=-1))
     sim['dot_prod'] = np.dot(token_vec, support_vec)
     sim['cosine'] = np.dot(token_vec, support_vec)/(np.linalg.norm(token_vec)*np.linalg.norm(support_vec)) if np.linalg.norm(support_vec) != 0 else 0
     return sim
 
+def calc_euc_dist(x1: np.ndarray, x2: np.ndarray):
+    return np.linalg.norm(x1 - x2, axis=-1)
+
 def calc_mahalanobis_dist(v: np.ndarray, X: np.ndarray):
     X_cov = np.cov(X, rowvar=False)
     X_mean = np.mean(X, axis=0)
-    d = np.zeros(v.shape[0])
-    for i in range(v.shape[0]):
-        v_e = v[i, :]
-        d[i] = np.sqrt(np.dot(np.dot((v_e - X_mean), X_cov), (v_e - X_mean).T))
-    return d
+    # d = np.zeros(v.shape[0])
+    # for i in range(v.shape[0]):
+    #     v_e = v[i, :]
+    #     d[i] = np.sqrt(np.dot(np.dot((v_e - X_mean), np.linalg.pinv(X_cov)), (v_e - X_mean).T))
+    D = v - X_mean
+    X_cov_inv = np.linalg.pinv(X_cov)
+    # return np.sqrt(np.sum(np.dot(D, X_cov_inv)*D, axis=1))
+    return np.sum(np.dot(D, X_cov_inv)*D, axis=1)
 
 def normalize(x: np.ndarray):
     return x/np.tile(np.expand_dims(np.linalg.norm(x, axis=-1), axis=-1), x.shape[-1])
@@ -145,6 +151,22 @@ def getNeTagMainPart(tag:str):
 
 def tags2binaryFlat(tags):
     return np.array([1 if t == 'T' or (len(t) > 2 and t[2:] == 'T') else 0 for seq in tags for t in seq])
+
+def tags2binaryPadded(tags:list):
+    if isinstance(tags[0], str):
+        tags = [tags]
+    n_sentences = len(tags)
+    tokens_length = get_tokens_len(tags)
+    max_len = np.max(tokens_length)
+    tokens_length = np.tile(np.expand_dims(tokens_length, -1), (1,max_len))
+    y = np.zeros((n_sentences, max_len))
+    range_ar = np.tile(np.arange(1, max_len+1, 1), (n_sentences, 1))
+    for i, sen in enumerate(tags):
+        for j, tag in enumerate(sen):
+            if tags[i][j] != 'O':
+                y[i][j] = 1
+#     y[range_ar > tokens_length] = -1
+    return y
 
 def get_matrices(tokens, tags, embedder):
     return (embeddings2feat_mat(embedder.embed(tokens), get_tokens_len(tokens)),

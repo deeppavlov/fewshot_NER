@@ -277,7 +277,7 @@ class ElmoEmbedder():
         sess.run(tf.global_variables_initializer())
         self.sess = sess
 
-    def get_tokens_embeddings(self, tokens_input: list, tokens_length:list=None):
+    def get_tokens_embeddings(self, tokens_input: list, tokens_length:list=None, res_as_dict=False):
         if not tokens_length:
             if isinstance(tokens_input[0], list):
                 tokens_length = [len(seq) for seq in tokens_input]
@@ -296,6 +296,8 @@ class ElmoEmbedder():
         embeddings_layer2 = elmo_res["lstm_outputs2"]
         embeddings_sum, word_emb, embeddings_layer1, embeddings_layer2 = self.sess.run([embeddings_sum, word_emb, embeddings_layer1, embeddings_layer2])
         word_emb = np.concatenate((word_emb, word_emb), axis=-1)
+        if res_as_dict:
+            return {'word': word_emb, 'layer1': embeddings_layer1, 'layer2': embeddings_layer2}
         # print(embeddings_sum.shape)
         # print(embeddings_layer1.shape)
         # print(embeddings_layer2.shape)
@@ -322,14 +324,15 @@ class CompositeEmbedder():
             self.glove = GloVeEmbedder('embeddings/glove.6B/glove.6B.100d.txt', pad_zero=True)
         self.embed_size = self.embed(['hehe']).shape[-1]
 
-    def embed(self, tokens: list):
+    def embed(self, tokens: list, res_as_dict=False):
         if isinstance(tokens[0], str):
             tokens = [tokens]
         # Get ELMo embeddings
         if self.use_elmo:
             tokens_input = add_padding(tokens)
             tokens_length = get_tokens_len(tokens)
-            embeddings = self.elmo.get_tokens_embeddings(tokens_input, tokens_length)
+            elmo_embed = self.elmo.get_tokens_embeddings(tokens_input, tokens_length)
+            embeddings = elmo_embed
             embeddings *= self.elmo_scale
             embed_size = embeddings.shape[-1]
 #             print(embeddings.shape)
@@ -358,6 +361,8 @@ class CompositeEmbedder():
             embed_size = embeddings.shape[-1]
 #             print(embeddings.shape)
 
+        if res_as_dict:
+            return {'elmo': elmo_embed, 'cap': cap_features, 'glove': glove_embed}
         return embeddings
 
 def select_sim_thresholds_with_cv(tokens: list, tags: list, embedder):
