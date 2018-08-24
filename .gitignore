@@ -1,3 +1,5 @@
 **/data/
 **/.ipynb_checkpoints
 **/.pyc
+**/graph/
+**/__pycache__
