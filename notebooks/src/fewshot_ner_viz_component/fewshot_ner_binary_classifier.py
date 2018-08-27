@@ -18,9 +18,11 @@ class FewshotNerBinaryClassifier():
         self.X_train = None
         self.y_train = None
         self.n_ne_tags = 0
+        self.n_tokens = 0
         self.ne_prototype = None
         self.embeddings_ne_flat = None
         self.svm_clf = SVC(probability=True, kernel='sigmoid')
+        self.n_example_sentences = 0
 
     def train_on_batch(self, tokens: list, tags: list):
         print('Train')
@@ -35,6 +37,7 @@ class FewshotNerBinaryClassifier():
             ne_prototype = np.zeros((embed_size,))
 
         tokens_length = get_tokens_len(tokens)
+        self.n_tokens += np.sum(tokens_length)
         tags_bin = tags2binaryFlat(tags)
     #     print(tags_bin)
         n_ne_tags = np.sum(tags_bin == 1) + self.n_ne_tags
@@ -59,7 +62,7 @@ class FewshotNerBinaryClassifier():
         X_train = embeddings2feat_mat(embeddings, get_tokens_len(tokens))
         y_train = tags_bin
 
-        self.n_ne_tags = n_ne_tags
+        self.n_ne_tags += n_ne_tags
         self.ne_prototype = ne_prototype
         if self.embeddings_ne_flat != None:
             self.embeddings_ne_flat = np.vstack([self.embeddings_ne_flat, embeddings_ne_flat])
@@ -78,7 +81,10 @@ class FewshotNerBinaryClassifier():
         n_words = self.y_train.size - sum(self.y_train)
         n_tokens = n_ne + n_words
         weights = [n_tokens/(2*n_ne) if label == 1 else n_tokens/(2*n_words) for label in self.y_train]
-        self.svm_clf.fit(self.X_train, self.y_train, weights)
+        if self.n_ne_tags < self.n_tokens and self.n_ne_tags != 0:
+            self.svm_clf.fit(self.X_train, self.y_train, weights)
+
+        self.n_example_sentences += len(tokens)
 
     def predict(self, tokens, methods, params):
         if isinstance(methods,str):
@@ -268,14 +274,38 @@ class FewshotNerBinaryClassifier():
         print()
         return {'pred': pred, 'probas': probas}
 
+    def __call__(self, tokens):
+        MODEL_PARAMS = {'ne_centroid': {'sim_type': 'cosine'},
+            'ne_nearest': {'sim_type': 'cosine'},
+            'weighted_kNN': {'k': 1, 'metric': 'cosine', 'use_class_weights': False, 'use_sim_weights': True},
+            'centroid_kNN': {'k': 10, 'metric': 'dot_prod', 'use_class_weights': False},
+            'svm': {}}
+        method = 'svm'
+        if self.n_example_sentences < 5:
+            method = 'weighted_kNN'
+        if self.n_ne_tags == self.n_tokens:
+            method = 'ne_centroid'
+
+        results = self.predict(tokens, methods=[method], params=MODEL_PARAMS)
+        return results[method]
+
+
 class ElmoEmbedder():
-    def __init__(self, custom_weights=False, weights: list = []):
+    def __init__(self, custom_weights=False, weights: list = [], trainable_cells=False, restore_path:str=None):
         self.custom_weights = custom_weights
         self.weights = weights
-        self.elmo = hub.Module("https://tfhub.dev/google/elmo/2", trainable=True)
+        module_path = "https://tfhub.dev/google/elmo/{}".format(1 if trainable_cells else 2)
+        self.elmo = hub.Module(module_path, trainable=True)
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
         self.sess = sess
+        elmo_vars = [v.name for v in tf.trainable_variables()]
+        elmo_vars_dict = {v.name: v for v in tf.trainable_variables()}
+        if restore_path:
+            print('Restoring finetuned ELMo params from {}'.format(restore_path))
+            saver = tf.train.Saver(elmo_vars_dict)
+            saver.restore(sess, restore_path)
+        self.elmo_vars = elmo_vars
 
     def get_tokens_embeddings(self, tokens_input: list, tokens_length:list=None, res_as_dict=False):
         if not tokens_length:

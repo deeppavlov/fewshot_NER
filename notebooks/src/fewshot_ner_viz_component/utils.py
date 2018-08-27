@@ -6,6 +6,7 @@ import math
 import matplotlib.pyplot as plt
 from scipy.stats.kde import gaussian_kde
 from numpy import linspace
+import re
 
 # Utility functions
 def get_tokens_len(tokens):
@@ -210,6 +211,27 @@ def flatten_sim(sim_list):
         sims_flat[sim_type] = np.array(sims_flat[sim_type])
     return sims_flat
 
+
+# ### Group similarities with tokens
+def zip_tokens_sim(tokens: list, sim_list: list, sim_type='cosine'):
+    tokens_sim = []
+    for i in range(len(tokens)):
+        tokens_sim.append([])
+        for j in range(len(tokens[i])):
+            tokens_sim[-1].append((tokens[i][j], sim_list[i][j][sim_type]))
+    return tokens_sim
+
+def zip_tokens_sim_list(tokens, sim_list):
+    tokens_sim = []
+    k = 0
+    # print(len(sim_list.shape))
+    for seq in tokens:
+        tokens_sim.append([])
+        for t in seq:
+            tokens_sim[-1].append((t, sim_list[k]))
+            k += 1
+    return tokens_sim
+
 def flat_sim_one_type(sim_list: list, sim_type: str):
     sims_flat = []
     for i in range(len(sim_list)):
@@ -297,6 +319,19 @@ def pred_class_labels_bin(scores: np.ndarray, threshold: float):
     pred = np.zeros(scores.size, dtype=int)
     pred[scores >= threshold] = 1
     return pred
+
+def findNE(sentences:list):
+        ne_list = []
+        sentences_sanitized = []
+        pattern = re.compile(r'\[([a-zA-Z]+)\]')
+        for sent in sentences:
+            ne_list.append([])
+            for ne in pattern.findall(sent):
+                ne_list[-1].append(ne)
+            sent = sent.replace('[', '')
+            sent = sent.replace(']', '')
+            sentences_sanitized.append(sent)
+        return ne_list, sentences_sanitized
 
 def chunk_finder(current_token, previous_token, tag):
     current_tag = current_token.split('-', 1)[-1]

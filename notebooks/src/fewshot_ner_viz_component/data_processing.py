@@ -13,18 +13,20 @@ def read_data():
     print(dataset['train'][50:60])
     return dataset
 
-def filter_data_by_ne_type(data:list, ne_types:list, tags2binary=False, preserveBIO=False):
+def filter_data_by_ne_type(data:list, ne_types:list, tags2binary=False, preserveBIO=False, keepIfAny=True):
     if ne_types == None or len(ne_types) == 0:
         return data
     data_filtered = []
     for tokens,tags in data:
         contains_all = True
+        contains_any = False
         tags_norm = [getNeTagMainPart(t) for t in tags]
         for ne_type in ne_types:
             if not ne_type in tags_norm:
                 contains_all = False
-                break
-        if contains_all:
+            if ne_type in tags_norm:
+                contains_any = True
+        if contains_all or (keepIfAny and contains_any):
             if tags2binary:
                 if preserveBIO:
                     tags = [tags[i][:2]+'T' if t in ne_types else 'O' for i,t in enumerate(tags_norm)]
@@ -33,7 +35,7 @@ def filter_data_by_ne_type(data:list, ne_types:list, tags2binary=False, preserve
             data_filtered.append((tokens,tags))
     return data_filtered
 
-def filter_dataset_by_ne_types(dataset: list, ne_types, preserveBIO=False):
+def filter_dataset_by_ne_types(dataset: list, ne_types, preserveBIO=False, keepIfAny=True):
     dataset = copy.deepcopy(dataset)
     if not isinstance(ne_types, list):
         ne_types = [ne_types]
