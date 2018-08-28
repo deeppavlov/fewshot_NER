@@ -26,12 +26,19 @@ class FewshotNerBinaryClassifier():
 
     def train_on_batch(self, tokens: list, tags: list):
         print('Train')
+
+        tokens = copy.deepcopy(tokens)
+        tags = copy.deepcopy(tags)
+        if isinstance(tokens[0], str):
+            tokens = [tokens]
+            tags = [tags]
+
         # Calculate embeddings
         embeddings = self.embedder.embed(tokens)
 
         # Calculate average vector for ne-tags
         embed_size = embeddings.shape[-1]
-        if self.ne_prototype != None:
+        if self._is_array_defined(self.ne_prototype):
             ne_prototype = self.ne_prototype*self.n_ne_tags
         else:
             ne_prototype = np.zeros((embed_size,))
@@ -40,7 +47,8 @@ class FewshotNerBinaryClassifier():
         self.n_tokens += np.sum(tokens_length)
         tags_bin = tags2binaryFlat(tags)
     #     print(tags_bin)
-        n_ne_tags = np.sum(tags_bin == 1) + self.n_ne_tags
+        n_ne_tags = np.sum(tags_bin == 1)
+        self.n_ne_tags += n_ne_tags
         embeddings_ne_flat = np.zeros((n_ne_tags, embed_size))
     #     print(n_ne_tags)
     #     n_ne_tags = 0
@@ -52,8 +60,8 @@ class FewshotNerBinaryClassifier():
                     embeddings_ne_flat[k,:] = embeddings[i,j,:]
                     k += 1
     #                 n_ne_tags += 1
-        if n_ne_tags != 0:
-            ne_prototype /= n_ne_tags
+        if self.n_ne_tags != 0:
+            ne_prototype /= self.n_ne_tags
         # print('ne mean vector: {}'.format(ne_prototype))
 
         # Calculate similarities
@@ -62,16 +70,15 @@ class FewshotNerBinaryClassifier():
         X_train = embeddings2feat_mat(embeddings, get_tokens_len(tokens))
         y_train = tags_bin
 
-        self.n_ne_tags += n_ne_tags
         self.ne_prototype = ne_prototype
-        if self.embeddings_ne_flat != None:
-            self.embeddings_ne_flat = np.vstack([self.embeddings_ne_flat, embeddings_ne_flat])
+        if self._is_array_defined(self.embeddings_ne_flat):
+            self.embeddings_ne_flat = np.concatenate([self.embeddings_ne_flat, embeddings_ne_flat])
         else:
             self.embeddings_ne_flat = embeddings_ne_flat
 
-        if self.X_train !=None:
-            self.X_train = np.vstack([self.X_train, X_train])
-            self.y_train = np.vstack([self.y_train, y_train])
+        if self._is_array_defined(self.X_train):
+            self.X_train = np.concatenate((self.X_train, X_train))
+            self.y_train = np.concatenate((self.y_train, y_train))
         else:
             self.X_train = X_train
             self.y_train = y_train
@@ -81,10 +88,15 @@ class FewshotNerBinaryClassifier():
         n_words = self.y_train.size - sum(self.y_train)
         n_tokens = n_ne + n_words
         weights = [n_tokens/(2*n_ne) if label == 1 else n_tokens/(2*n_words) for label in self.y_train]
+        print('# ne: {}, # tokens: {}'.format(self.n_ne_tags, self.n_tokens))
         if self.n_ne_tags < self.n_tokens and self.n_ne_tags != 0:
+            print('n_samples: {}'.format(self.X_train.shape[0]))
             self.svm_clf.fit(self.X_train, self.y_train, weights)
 
         self.n_example_sentences += len(tokens)
+    
+    def _is_array_defined(self, x):
+        return isinstance(x, np.ndarray)
 
     def predict(self, tokens, methods, params):
         if isinstance(methods,str):

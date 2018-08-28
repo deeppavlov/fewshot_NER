@@ -4,8 +4,10 @@ from src.fewshot_ner_viz_component.utils import flatten_sim, zip_tokens_sim, zip
 import numpy as np
 
 class NeSimVisualizer():
-    def __init__(self, color:dict=None):
+    def __init__(self, color:dict=None, height='auto', width='auto'):
         self.bg_color = color if color != None else NeSimVisualizer.get_color()
+        self.height = height
+        self.width = width
 
     @staticmethod
     def get_color(red=0, green=255, blue=0):
@@ -19,9 +21,8 @@ class NeSimVisualizer():
     def get_token_span_str(token, color, cf=1):
         return '<span style="padding: 0.15em; margin-right: 4px; border-radius: 0.25em; background: {};">{}</span>'.format(NeSimVisualizer.get_rgba_str(color, alpha=cf), token)
 
-    @staticmethod
-    def wrap_with_style(html):
-        return '<div style="line-height: 1.5em;">{:s}</div>'.format(html)
+    def wrap_with_style(self, html):
+        return '<div style="line-height: 1.8em; border: 2px solid black; padding: 5px; height: {1}; width: {2};">{0:s}</div>'.format(html, self.height, self.width)
 
     def sim_transform_lin(self, sim):
         # similarity transformation for better visualization
@@ -39,10 +40,13 @@ class NeSimVisualizer():
         return color
 
     def get_colored_results_html(self, tokens_sim: list, color, transform_sim=True, T=0.5, title=''):
+        chars_on_line_max = 120
         s = '<h3 style="margin-bottom:0.3em;">{}</h3>'.format(title)
-        s += '<br/><br/>'
+        s += '<br/>'
         for seq in tokens_sim:
+            n_chars_on_line = 0
             for token, sim in seq:
+                n_chars_on_line += len(token) + 1
                 if transform_sim:
                     sim = self.sim_transform(sim, T)
                 alpha = sim
@@ -58,9 +62,12 @@ class NeSimVisualizer():
                 else:
                     color_display = color
                 s += NeSimVisualizer.get_token_span_str(token, color_display, cf=alpha)
-    #             s += ' '
+                if n_chars_on_line > chars_on_line_max:
+                    s += '<br/>'
+                    n_chars_on_line = 0
+            
             s += '<br/><br/>'
-        return NeSimVisualizer.wrap_with_style(s)
+        return self.wrap_with_style(s)
 
     def display_ne_sim(self, tokens, sim_list, transform=True, title=''):
 #         print(sim_list)
@@ -72,4 +79,4 @@ class NeSimVisualizer():
         else:
             tokens_sim = zip_tokens_sim_list(tokens, sim_list)
         
-        display(HTML(self.get_colored_results_html(tokens_sim, color=self.bg_color, transform_sim=transform)))
+        display(HTML(self.get_colored_results_html(tokens_sim, color=self.bg_color, transform_sim=transform, title=title)))
