@@ -63,7 +63,8 @@ def calc_mahalanobis_dist(v: np.ndarray, X: np.ndarray):
     return np.sum(np.dot(D, X_cov_inv)*D, axis=1)
 
 def normalize(x: np.ndarray):
-    return x/np.tile(np.expand_dims(np.linalg.norm(x, axis=-1), axis=-1), x.shape[-1])
+    e = 1e-10
+    return x/(np.tile(np.expand_dims(np.linalg.norm(x, axis=-1), axis=-1), x.shape[-1]) + e)
 
 def calc_sim_by_type(x1: np.ndarray, x2: np.ndarray, sim_type='cosine'):
     if sim_type == 'euc_dist':
