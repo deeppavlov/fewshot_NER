@@ -112,7 +112,7 @@ def plotPDE(sims, y, info=''):
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 def plot_tSNE(X, y: np.ndarray, colors=('g', 'r'), labels=('words','entities'), title='', use_pca=False, subplot=None):
-    X = deepcopy(X)
+    X = copy.deepcopy(X)
     if use_pca:
         X = PCA(n_components=50).fit_transform(X)
     tsne = TSNE(n_components=2, method='exact', init='pca')

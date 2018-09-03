@@ -9,6 +9,7 @@ import tensorflow as tf
 from deeppavlov.dataset_readers.ontonotes_reader import OntonotesReader
 from deeppavlov.models.preprocessors.capitalization import CapitalizationPreprocessor
 from deeppavlov.models.embedders.glove_embedder import GloVeEmbedder
+from deeppavlov.models.embedders.fasttext_embedder import FasttextEmbedder
 from src.fewshot_ner_viz_component.utils import *
 # from utils import *
 
@@ -94,7 +95,7 @@ class FewshotNerBinaryClassifier():
             self.svm_clf.fit(self.X_train, self.y_train, weights)
 
         self.n_example_sentences += len(tokens)
-    
+
     def _is_array_defined(self, x):
         return isinstance(x, np.ndarray)
 
@@ -352,18 +353,21 @@ class ElmoEmbedder():
         return embeddings
 
 class CompositeEmbedder():
-    def __init__(self, use_elmo=True, elmo_scale=1., cap_scale=1., use_cap_feat=False, use_glove=False, elmo_params={}):
+    def __init__(self, use_elmo=True, elmo_scale=1., cap_scale=1., use_cap_feat=False, use_glove=False, use_fastText=False, elmo_params={}):
         self.use_elmo = use_elmo
         self.elmo_scale = elmo_scale
         self.cap_scale = cap_scale
         self.use_cap_feat = use_cap_feat
         self.use_glove = use_glove
+        self.use_fastText = use_fastText
         if self.use_elmo:
             self.elmo = ElmoEmbedder(**elmo_params)
         if self.use_cap_feat:
             self.cap_prep = CapitalizationPreprocessor()
         if self.use_glove:
             self.glove = GloVeEmbedder('embeddings/glove.6B/glove.6B.100d.txt', pad_zero=True)
+        if self.use_fastText:
+            self.fastText = FasttextEmbedder('embeddings/wiki.en.bin', pad_zero=True)
         self.embed_size = self.embed(['hehe']).shape[-1]
 
     def embed(self, tokens: list, res_as_dict=False):
@@ -402,6 +406,16 @@ class CompositeEmbedder():
                 embeddings = np.concatenate((embeddings, glove_embed), axis=2)
             embed_size = embeddings.shape[-1]
 #             print(embeddings.shape)
+
+        # Use fastText embeddings
+        if self.use_fastText:
+            fasttext_embed = self.fastText(to_lower_case(tokens))
+            fasttext_embed = np.array(fasttext_embed)
+            if not self.use_elmo:
+                embeddings = fasttext_embed
+            else:
+                embeddings = np.concatenate((embeddings, fasttext_embed), axis=2)
+            embed_size = embeddings.shape[-1]
 
         if res_as_dict:
             return {'elmo': elmo_embed, 'cap': cap_features, 'glove': glove_embed}
