@@ -9,7 +9,7 @@ import tensorflow as tf
 from deeppavlov.dataset_readers.ontonotes_reader import OntonotesReader
 from deeppavlov.models.preprocessors.capitalization import CapitalizationPreprocessor
 from deeppavlov.models.embedders.glove_embedder import GloVeEmbedder
-from deeppavlov.models.embedders.fasttext_embedder import FasttextEmbedder
+# from deeppavlov.models.embedders.fasttext_embedder import FasttextEmbedder
 from src.fewshot_ner_viz_component.utils import *
 # from utils import *
 
