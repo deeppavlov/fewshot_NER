@@ -47,3 +47,34 @@ def filter_dataset_by_ne_types(dataset: list, ne_types, preserveBIO=False, keepI
 def get_data_sample(data, n_samples: int):
     indices = np.random.choice(len(data), size=n_samples, replace=False)
     return split_tokens_tags([data[i] for i in indices])
+
+
+class DatasetIterator:
+    def __init__(self, data):
+        self.data = {
+            'train': data['train'],
+            'valid': data['valid'],
+            'test': data['test']
+        }
+
+    def get_samples_count(self, data_type='train'):
+        return len(self.data[data_type])
+
+    def gen_batches(self, batch_size, data_type='train', shuffle=True, binaryTags=False, tag2idx=None):
+        indices = np.arange(len(self.data[data_type]))
+        if shuffle:
+            np.random.shuffle(indices)
+        n = indices.size
+        k = 0
+        while k < n:
+            top = k + batch_size
+            if top > n:
+                top = n
+            indices_batch = indices[k:top]
+            tokens,tags = split_tokens_tags([self.data[data_type][i] for i in indices_batch])
+            mask = make_mask(tokens)
+            tokens_length = get_tokens_len(tokens)
+            tokens = add_padding(tokens)
+            y = tagsEncodePadded(tags, binary=binaryTags, tag2idx=tag2idx)
+            yield tokens, tags, mask, y
+            k += batch_size

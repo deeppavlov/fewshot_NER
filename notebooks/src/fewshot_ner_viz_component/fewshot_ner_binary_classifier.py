@@ -9,12 +9,12 @@ import tensorflow as tf
 from deeppavlov.dataset_readers.ontonotes_reader import OntonotesReader
 from deeppavlov.models.preprocessors.capitalization import CapitalizationPreprocessor
 from deeppavlov.models.embedders.glove_embedder import GloVeEmbedder
-# from deeppavlov.models.embedders.fasttext_embedder import FasttextEmbedder
+from deeppavlov.models.embedders.fasttext_embedder import FasttextEmbedder
 from src.fewshot_ner_viz_component.utils import *
 # from utils import *
 
 class FewshotNerBinaryClassifier():
-    def __init__(self, embedder):
+    def __init__(self, embedder, svm_kernel='sigmoid'):
         self.embedder = embedder
         self.X_train = None
         self.y_train = None
@@ -22,7 +22,7 @@ class FewshotNerBinaryClassifier():
         self.n_tokens = 0
         self.ne_prototype = None
         self.embeddings_ne_flat = None
-        self.svm_clf = SVC(probability=True, kernel='sigmoid')
+        self.svm_clf = SVC(probability=True, kernel=svm_kernel)
         self.n_example_sentences = 0
 
     def train_on_batch(self, tokens: list, tags: list):
