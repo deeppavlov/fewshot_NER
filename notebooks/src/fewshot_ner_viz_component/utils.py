@@ -142,11 +142,31 @@ def embeddings2feat_mat(embeddings:np.ndarray, tokens_length):
             k += 1
     return feat_mat
 
+def embeddings2list(embeddings:np.ndarray, tokens_length, feat2dict=False):
+    embed_list = []
+    for i in range(len(tokens_length)):
+        embed_list.append([])
+        for j in range(tokens_length[i]):
+            features = embeddings[i, j, :]
+            if feat2dict:
+                features = {'f'+str(i+1): features[i] for i in range(features.size)}
+            embed_list[-1].append(features)
+    return embed_list
+
 def flatten_list(ar:list):
     flat = []
     for sublist in ar:
         flat += sublist
     return flat
+
+def flatten_with_mask(seq_mat: np.ndarray, mask):
+    return seq_mat[mask == 1]
+
+def remove_padding(seq_list: list, mask):
+    seq_lengths = np.sum(mask, axis=1)
+    res = [seq_list[i][:seq_lengths[i]] for i in range(len(seq_list))]
+    return res
+
 
 def getNeTagMainPart(tag:str):
     return tag[2:] if tag != 'O' else tag
@@ -322,17 +342,49 @@ def pred_class_labels_bin(scores: np.ndarray, threshold: float):
     return pred
 
 def findNE(sentences:list):
-        ne_list = []
-        sentences_sanitized = []
-        pattern = re.compile(r'\[([a-zA-Z]+)\]')
-        for sent in sentences:
-            ne_list.append([])
-            for ne in pattern.findall(sent):
-                ne_list[-1].append(ne)
-            sent = sent.replace('[', '')
-            sent = sent.replace(']', '')
-            sentences_sanitized.append(sent)
-        return ne_list, sentences_sanitized
+    ne_list = []
+    sentences_sanitized = []
+    pattern = re.compile(r'\[([a-zA-Z]+)\]')
+    for sent in sentences:
+        ne_list.append([])
+        for ne in pattern.findall(sent):
+            ne_list[-1].append(ne)
+        sent = sent.replace('[', '')
+        sent = sent.replace(']', '')
+        sentences_sanitized.append(sent)
+    return ne_list, sentences_sanitized
+
+def make_mask(seq_list):
+    seq_count = len(seq_list)
+    seq_length = [len(s) for s in seq_list]
+    max_len = np.max(seq_length)
+    mask = np.zeros((seq_count, max_len), dtype=int)
+    seq_length = np.tile(np.expand_dims(seq_length, axis=-1), (1, max_len))
+    range_ar = np.tile(np.arange(1, max_len+1, 1), (seq_count, 1))
+    mask[range_ar <= seq_length] = 1
+    return mask
+
+def tagsEncodePadded(tags:list, binary=True, tag2idx=None):
+    if tag2idx:
+        binary = False
+    if isinstance(tags[0], str):
+        tags = [tags]
+    n_sentences = len(tags)
+    tokens_length = get_tokens_len(tags)
+    max_len = np.max(tokens_length)
+    y = np.zeros((n_sentences, max_len))
+    for i, sen in enumerate(tags):
+        for j, tag in enumerate(sen):
+            if binary:
+                y[i][j] = 1 if tags[i][j] != 'O' else 0
+            else:
+                if tag2idx:
+#                     tag_name = tag if USE_BIO_MARKUP else getNeTagMainPart(tag)
+                    tag_name = tag   # in case when BIO markup was deleted from data
+                    y[i][j] = tag2idx[tag_name]
+                else:
+                    raise Exception('tag2idx dictionary should be provided')
+    return y
 
 def chunk_finder(current_token, previous_token, tag):
     current_tag = current_token.split('-', 1)[-1]

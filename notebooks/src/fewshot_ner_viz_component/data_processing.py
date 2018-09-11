@@ -48,7 +48,6 @@ def get_data_sample(data, n_samples: int):
     indices = np.random.choice(len(data), size=n_samples, replace=False)
     return split_tokens_tags([data[i] for i in indices])
 
-
 class DatasetIterator:
     def __init__(self, data):
         self.data = {

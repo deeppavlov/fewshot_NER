@@ -3,6 +3,7 @@ import sys
 import copy
 from math import ceil, floor
 from sklearn.svm import SVC
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score
 import tensorflow_hub as hub
 import tensorflow as tf
@@ -11,22 +12,58 @@ from deeppavlov.models.preprocessors.capitalization import CapitalizationPreproc
 from deeppavlov.models.embedders.glove_embedder import GloVeEmbedder
 from deeppavlov.models.embedders.fasttext_embedder import FasttextEmbedder
 from src.fewshot_ner_viz_component.utils import *
+import sklearn_crfsuite
 # from utils import *
 
+DEFAULT_MODEL_PARAMS = {
+    'ne_centroid': {'sim_type': 'cosine'},
+    'ne_nearest': {'sim_type': 'cosine'},
+    'weighted_kNN': {'k': 1, 'metric': 'cosine', 'use_class_weights': False, 'use_sim_weights': True},
+    'centroid_kNN': {'k': 10, 'metric': 'dot_prod', 'use_class_weights': False},
+    'svm': {'kernel': 'sigmoid'},
+    'crf': {'algorithm': 'lbfgs', 'c1': 0.1, 'c2': 0.1},
+    'logreg': {'C': 1000000000}}
+
 class FewshotNerBinaryClassifier():
-    def __init__(self, embedder, svm_kernel='sigmoid'):
+    def __init__(self, embedder, use_crf=False, use_logreg=False, model_params={}, verbose=True):
         self.embedder = embedder
-        self.X_train = None
+        self.model_params = DEFAULT_MODEL_PARAMS
+        self._update_model_params(model_params)
+        self.X_train = None  # single matrix
+        self.X_train_sents = None  # sentences
         self.y_train = None
+        self.tags = None
         self.n_ne_tags = 0
         self.n_tokens = 0
         self.ne_prototype = None
         self.embeddings_ne_flat = None
-        self.svm_clf = SVC(probability=True, kernel=svm_kernel)
+        self.svm_clf = SVC(probability=True, kernel=self.model_params['svm']['kernel'])
+        self.crf_clf = None
+        if use_crf:
+            print(self.model_params['crf'])
+            self.crf_clf = sklearn_crfsuite.CRF(
+                algorithm=self.model_params['crf']['algorithm'],
+                c1=self.model_params['crf']['c1'],
+                c2=self.model_params['crf']['c2'],
+                max_iterations=100,
+                all_possible_transitions=True
+            )
+        self.logreg_clf = None
+        if use_logreg:
+            self.logreg_clf = LogisticRegression(C=self.model_params['logreg']['C'])
         self.n_example_sentences = 0
+        self.verbose = verbose
+
+    def _update_model_params(self, model_params):
+        for model in model_params.keys():
+            if self.model_params.get(model):
+                self.model_params[model].update(model_params[model])
+            else:
+                self.model_params[model] = model_params[model]
 
     def train_on_batch(self, tokens: list, tags: list):
-        print('Train')
+        if self.verbose:
+            print('Train')
 
         tokens = copy.deepcopy(tokens)
         tags = copy.deepcopy(tags)
@@ -80,30 +117,47 @@ class FewshotNerBinaryClassifier():
         if self._is_array_defined(self.X_train):
             self.X_train = np.concatenate((self.X_train, X_train))
             self.y_train = np.concatenate((self.y_train, y_train))
+            self.tags.extend(tags)
         else:
             self.X_train = X_train
             self.y_train = y_train
+            self.tags = tags
+
+
+        X_train_sents = embeddings2list(embeddings, tokens_length, feat2dict=True)
+        if self._is_array_defined(self.X_train_sents):
+            self.X_train_sents.extend(X_train_sents)
+        else:
+            self.X_train_sents = X_train_sents
 
         # SVM train
         n_ne = sum(self.y_train)
         n_words = self.y_train.size - sum(self.y_train)
         n_tokens = n_ne + n_words
         weights = [n_tokens/(2*n_ne) if label == 1 else n_tokens/(2*n_words) for label in self.y_train]
-        print('# ne: {}, # tokens: {}'.format(self.n_ne_tags, self.n_tokens))
+        if self.verbose:
+            print('# ne: {}, # tokens: {}'.format(self.n_ne_tags, self.n_tokens))
         if self.n_ne_tags < self.n_tokens and self.n_ne_tags != 0:
-            print('n_samples: {}'.format(self.X_train.shape[0]))
+            if self.verbose:
+                print('n_samples: {}'.format(self.X_train.shape[0]))
             self.svm_clf.fit(self.X_train, self.y_train, weights)
+
+        # CRF
+        self.crf_clf.fit(self.X_train_sents, self.tags)
+        # LogReg
+        self.logreg_clf.fit(self.X_train, self.y_train)
 
         self.n_example_sentences += len(tokens)
 
     def _is_array_defined(self, x):
-        return isinstance(x, np.ndarray)
+        return isinstance(x, np.ndarray) or isinstance(x, list)
 
     def predict(self, tokens, methods, params):
         if isinstance(methods,str):
             methods = [methods]
         embeddings = self.embedder.embed(tokens)
         X_test = embeddings2feat_mat(embeddings, get_tokens_len(tokens))
+        X_test_sent = embeddings2list(embeddings, get_tokens_len(tokens), feat2dict=True)
         results = {}
         if 'ne_centroid' in methods:
             results.update({
@@ -120,7 +174,12 @@ class FewshotNerBinaryClassifier():
         if 'centroid_kNN' in methods:
             results.update({
                 'centroid_kNN': self._predict_with_centroid_kNN(X_test, **params['centroid_kNN'])})
-
+        if 'crf' in methods and self.crf_clf:
+            results.update({
+                'crf': self._predict_with_CRF(X_test_sent)})
+        if 'logreg' in methods and self.logreg_clf:
+            results.update({
+                'logreg': self._predict_with_logreg(X_test)})
         return results
 
     def _predict_with_ne_centroid(self, tokens: list, embeddings: np.ndarray=None, sim_type='cosine'):
@@ -143,7 +202,8 @@ class FewshotNerBinaryClassifier():
         return {'sim': sim_list, 'pred': pred, 'probas': probas}
 
     def _predict_with_ne_nearest(self, tokens: list, embeddings: np.ndarray = None, sim_type='cosine'):
-        print('NE nearest similarity model')
+        if self.verbose:
+            print('NE nearest similarity model')
         if isinstance(tokens[0], str):
             tokens = [tokens]
 
@@ -175,15 +235,29 @@ class FewshotNerBinaryClassifier():
         return {'sim': sim_list, 'pred': pred, 'probas': probas}
 
     def _predict_with_SVM(self, X_test: np.ndarray):
-        print('SVM classifier model')
+        if self.verbose:
+            print('SVM classifier model')
         pred = self.svm_clf.predict(X_test)
         probas = self.svm_clf.predict_proba(X_test)[:,1]
 
         return {'pred': pred, 'probas': probas}
 
+    def _predict_with_CRF(self, X_test: np.ndarray):
+        if self.verbose:
+            print('CRF classifier model')
+        pred = tags2binaryFlat(self.crf_clf.predict(X_test))
+        return {'pred': pred}
+
+    def _predict_with_logreg(self, X_test: np.ndarray):
+        if self.verbose:
+            print('LogReg classifier model')
+        pred = self.logreg_clf.predict(X_test)
+        return {'pred': pred}
+
     def _predict_with_weighted_kNN(self, X_test, k=3, metric='dot_prod', use_class_weights=False, use_sim_weights=True):
-        print('Weighted kNN model')
-        print('k = {}, metric: {}'. format(k, metric))
+        if self.verbose:
+            print('Weighted kNN model')
+            print('k = {}, metric: {}'. format(k, metric))
         X_train = self.X_train
         y_train = self.y_train
         # Weights for classes
@@ -237,8 +311,9 @@ class FewshotNerBinaryClassifier():
         return {'pred': pred, 'probas': probas}
 
     def _predict_with_centroid_kNN(self, X_test, y_test=None, k=5, metric='cosine', use_class_weights=False):
-        print('NE centroid + words kNN similarity model')
-        print('k = {}, metric: {}'. format(k, metric))
+        if self.verbose:
+            print('NE centroid + words kNN similarity model')
+            print('k = {}, metric: {}'. format(k, metric))
         X_train = self.X_train
         y_train = self.y_train
         # Weights for classes
@@ -288,20 +363,13 @@ class FewshotNerBinaryClassifier():
         return {'pred': pred, 'probas': probas}
 
     def __call__(self, tokens):
-        MODEL_PARAMS = {'ne_centroid': {'sim_type': 'cosine'},
-            'ne_nearest': {'sim_type': 'cosine'},
-            'weighted_kNN': {'k': 1, 'metric': 'cosine', 'use_class_weights': False, 'use_sim_weights': True},
-            'centroid_kNN': {'k': 10, 'metric': 'dot_prod', 'use_class_weights': False},
-            'svm': {}}
         method = 'svm'
         if self.n_example_sentences < 5:
             method = 'weighted_kNN'
         if self.n_ne_tags == self.n_tokens:
             method = 'ne_centroid'
-
-        results = self.predict(tokens, methods=[method], params=MODEL_PARAMS)
+        results = self.predict(tokens, methods=[method], params=DEFAULT_MODEL_PARAMS)
         return results[method]
-
 
 class ElmoEmbedder():
     def __init__(self, custom_weights=False, weights: list = [], trainable_cells=False, restore_path:str=None):

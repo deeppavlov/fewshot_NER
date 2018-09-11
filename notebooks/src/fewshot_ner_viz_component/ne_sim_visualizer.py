@@ -83,8 +83,6 @@ class NeSimVisualizer():
 
     def display_ne_sim(self, tokens, sim_list, transform=True, title='', true_labels=None):
         self.true_labels = true_labels
-#         print(self.true_labels)
-#         print(sim_list)
         if isinstance(sim_list[0], list) and isinstance(sim_list[0][0], dict):
             tokens_sim = zip_tokens_sim(tokens, sim_list)
             sim_flat = flatten_sim(sim_list)
@@ -92,5 +90,4 @@ class NeSimVisualizer():
             self.sim_max = np.max(sim_flat['cosine'])
         else:
             tokens_sim = zip_tokens_sim_list(tokens, sim_list)
-#         print(tokens_sim)
         display(HTML(self.get_colored_results_html(tokens_sim, color=self.bg_color, transform_sim=transform, title=title)))
